@@ -40,7 +40,7 @@ const CeleryLogs = () => {
     if (logEntries.length === 0) {
       const lines = content.split('\\n').filter(line => line.trim())
       
-      lines.forEach((line, index) => {
+      lines.forEach((line) => {
         // Try Celery log format: [DD/MMM/YYYY HH:MM:SS: LEVEL/Process] message
         let match = line.match(/^\[(\d{2}\/\w{3}\/\d{4}\s+\d{2}:\d{2}:\d{2}):\s+(\w+)\/(\w+)\]\s+(.*)$/)
         
@@ -169,6 +169,7 @@ const CeleryLogs = () => {
       // Handle Django format: "2025-06-04 10:51:18,412"
       return new Date(timestamp.replace(',', '.')).toLocaleString()
     } catch (error) {
+      console.error('Error formatting timestamp:', error)
       return timestamp
     }
   }
