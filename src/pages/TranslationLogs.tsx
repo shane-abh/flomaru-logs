@@ -44,7 +44,7 @@ interface ApiResponse {
   }
 }
 
-const DebugLogs = () => {
+const TranslationLogs = () => {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null)
   const [pagination, setPagination] = useState<Pagination | null>(null)
@@ -54,20 +54,18 @@ const DebugLogs = () => {
   const [limit, setLimit] = useState<string>('100')
   const hasFetched = useRef(false)
 
-
   const fetchLogs = useCallback(async () => {
     try {
       setLoading(true)
       setError('')
-      
-      // Build URL with parameters
-      const url = new URL('https://www.flomaru.com/api/logs/debug-log/')
+
+      const url = new URL('https://www.flomaru.com/api/logs/translation-log/')
       if (hours) url.searchParams.append('hours', hours)
       if (limit) url.searchParams.append('limit', limit)
-      
+
       const res = await fetch(url.toString())
       const data: ApiResponse = await res.json()
-      
+
       if (data.success && data.data) {
         // Parse each log entry to extract structured components
         const parsedLogs = data.data.logs.map(log => parseLogContent(log.content))
@@ -114,26 +112,18 @@ const DebugLogs = () => {
 
   const formatTimestamp = (timestamp: string) => {
     try {
-      // Handle empty timestamp
       if (!timestamp || timestamp.trim() === '') {
         return 'No timestamp'
       }
-      
-      // Handle Celery format: "29/Oct/2025 20:56:06"
       if (timestamp.includes('/')) {
         return new Date(timestamp).toLocaleString()
       }
-      
-      // Handle ISO format: "2025-10-29T20:56:06"
       if (timestamp.includes('T')) {
         return new Date(timestamp).toLocaleString()
       }
-      
-      // Handle Django format: "2025-06-04 10:51:18,412"
       if (timestamp.includes(',')) {
         return new Date(timestamp.replace(',', '.')).toLocaleString()
       }
-      
       return new Date(timestamp).toLocaleString()
     } catch {
       return timestamp
@@ -158,8 +148,8 @@ const DebugLogs = () => {
 
   return (
     <div className="max-w-7xl p-6">
-      <h1 className="text-3xl font-bold mb-6">Debug Logs</h1>
-      
+      <h1 className="text-3xl font-bold mb-6">Translation Logs</h1>
+
       {/* Filter Controls */}
       <div className="mb-6 p-4 bg-white border rounded-lg shadow-sm">
         <h2 className="text-lg font-semibold mb-4">Filter Logs</h2>
@@ -207,7 +197,7 @@ const DebugLogs = () => {
           </div>
         </div>
       </div>
-      
+
       {/* File Info */}
       {fileInfo && (
         <div className="mb-6 p-4 bg-gray-50 rounded-lg">
@@ -220,7 +210,7 @@ const DebugLogs = () => {
               <span className="font-medium">Path:</span> {fileInfo.path}
             </div>
             <div>
-              <span className="font-medium">Exists:</span> 
+              <span className="font-medium">Exists:</span>
               <span className={`ml-1 ${fileInfo.exists ? 'text-green-600' : 'text-red-600'}`}>
                 {fileInfo.exists ? 'Yes' : 'No'}
               </span>
@@ -228,7 +218,7 @@ const DebugLogs = () => {
           </div>
         </div>
       )}
-      
+
       {/* Pagination Info */}
       {pagination && (
         <div className="mb-4 p-3 bg-blue-50 rounded-lg">
@@ -242,18 +232,18 @@ const DebugLogs = () => {
           </div>
         </div>
       )}
-      
+
       {logs.length === 0 && !loading && !error && (
         <div className="text-center py-8">
           <p className="text-gray-500">No logs found</p>
         </div>
       )}
-      
+
       {/* Logs */}
       {logs.length > 0 && (
         <div className="space-y-2 max-h-screen overflow-y-auto">
           {logs.map((log, index) => (
-            <div 
+            <div
               key={index}
               className={`p-4 rounded-lg border-l-4 ${getLogLevelColor(log.level)}`}
             >
@@ -300,4 +290,6 @@ const DebugLogs = () => {
   )
 }
 
-export default DebugLogs
+export default TranslationLogs
+
+

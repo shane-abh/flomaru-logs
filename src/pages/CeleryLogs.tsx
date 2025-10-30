@@ -1,150 +1,102 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { parseLogContent } from '../utils/logParser'
 
 interface LogEntry {
+  time: string
+  content: string
   level: string
   timestamp: string
-  module: string
-  processId: string
-  threadId: string
-  message: string
-  rawLine: string
+  datetime?: string
+  parsed?: {
+    timestamp: string
+    level: string
+    module: string
+    lineNumber: string
+    processId: string
+    threadId: string
+    taskId?: string
+    message: string
+  }
+}
+
+interface FileInfo {
+  filename: string
+  path: string
+  exists: boolean
+}
+
+interface Pagination {
+  lines_returned: number
+  limit: number
+  total_lines_in_file: number
+}
+
+interface ApiResponse {
+  success: boolean
+  data: {
+    file_info: FileInfo
+    logs: LogEntry[]
+    pagination: Pagination
+  }
+  meta: {
+    timestamp: string
+    endpoint: string
+  }
 }
 
 const CeleryLogs = () => {
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [fileInfo, setFileInfo] = useState<FileInfo | null>(null)
+  const [pagination, setPagination] = useState<Pagination | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string>('')
+  const [hours, setHours] = useState<string>('6')
+  const [limit, setLimit] = useState<string>('100')
+  const hasFetched = useRef(false)
 
-  const parseLogContent = (content: string): LogEntry[] => {
-    // First, let's try to split by Celery log pattern to handle cases where logs are concatenated
-    const celeryLogPattern = /\[(\d{2}\/\w{3}\/\d{4}\s+\d{2}:\d{2}:\d{2}):\s+(\w+)\/(\w+)\]\s+(.*?)(?=\[\d{2}\/\w{3}\/\d{4}\s+\d{2}:\d{2}:\d{2}:\s+\w+\/\w+\]|$)/gs
-    
-    const logEntries: LogEntry[] = []
-    
-    // Try to match Celery logs first
-    let match
-    while ((match = celeryLogPattern.exec(content)) !== null) {
-      const [, timestamp, level, process, message] = match
-      logEntries.push({
-        level,
-        timestamp: timestamp,
-        module: process,
-        processId: '0',
-        threadId: '0',
-        message: message.trim(),
-        rawLine: match[0]
-      })
-    }
-    
-    // If no Celery logs found, try line-by-line parsing
-    if (logEntries.length === 0) {
-      const lines = content.split('\\n').filter(line => line.trim())
+
+  const fetchLogs = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError('')
       
-      lines.forEach((line) => {
-        // Try Celery log format: [DD/MMM/YYYY HH:MM:SS: LEVEL/Process] message
-        let match = line.match(/^\[(\d{2}\/\w{3}\/\d{4}\s+\d{2}:\d{2}:\d{2}):\s+(\w+)\/(\w+)\]\s+(.*)$/)
-        
-        if (match) {
-          const [, timestamp, level, process, message] = match
-          logEntries.push({
-            level,
-            timestamp: timestamp,
-            module: process,
-            processId: '0',
-            threadId: '0',
-            message,
-            rawLine: line
-          })
-        } else {
-          // Try Django log format: LEVEL YYYY-MM-DD HH:MM:SS,mmm module process_id thread_id message
-          match = line.match(/^(\w+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3})\s+(\S+)\s+(\d+)\s+(\d+)\s+(.*)$/)
-          
-          if (match) {
-            const [, level, timestamp, module, processId, threadId, message] = match
-            logEntries.push({
-              level,
-              timestamp,
-              module,
-              processId,
-              threadId,
-              message,
-              rawLine: line
-            })
-          } else {
-            // Try pattern without thread_id: LEVEL YYYY-MM-DD HH:MM:SS,mmm module process_id message
-            match = line.match(/^(\w+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3})\s+(\S+)\s+(\d+)\s+(.*)$/)
-            if (match) {
-              const [, level, timestamp, module, processId, message] = match
-              logEntries.push({
-                level,
-                timestamp,
-                module,
-                processId,
-                threadId: '0',
-                message,
-                rawLine: line
-              })
-            } else {
-              // Handle continuation lines or malformed entries
-              if (logEntries.length > 0) {
-                const lastEntry = logEntries[logEntries.length - 1]
-                lastEntry.message += ' ' + line
-                lastEntry.rawLine += '\\n' + line
-              } else {
-                // If no previous entry, create a raw entry
-                logEntries.push({
-                  level: 'RAW',
-                  timestamp: new Date().toISOString(),
-                  module: 'unknown',
-                  processId: '0',
-                  threadId: '0',
-                  message: line,
-                  rawLine: line
-                })
-              }
-            }
-          }
-        }
-      })
+      // Build URL with parameters
+      const url = new URL('https://www.flomaru.com/api/logs/celery-log/')
+      if (hours) url.searchParams.append('hours', hours)
+      if (limit) url.searchParams.append('limit', limit)
+      
+      const res = await fetch(url.toString())
+      const data: ApiResponse = await res.json()
+      
+      if (data.success && data.data) {
+        // Parse each log entry to extract structured components
+        const parsedLogs = data.data.logs.map(log => parseLogContent(log.content))
+        setLogs(parsedLogs)
+        setFileInfo(data.data.file_info)
+        setPagination(data.data.pagination)
+      } else {
+        setError('API request was not successful')
+      }
+    } catch (err) {
+      console.error('Error fetching logs:', err)
+      setError('Failed to fetch logs: ' + (err as Error).message)
+    } finally {
+      setLoading(false)
     }
-
-    console.log('Parsed log entries:', logEntries.length, 'entries')
-    console.log('First few entries:', logEntries.slice(0, 3))
-    return logEntries
-  }
+  }, [hours, limit])
 
   useEffect(() => {
-    const fetchLogs = async () => {
-      try {
-        setLoading(true)
-        console.log('Fetching logs from API...')
-        const res = await fetch('https://www.flomaru.com/api/logs/celery-log/')
-        const data = await res.json()
-        console.log('API Response:', data)
-        
-        if (data.content) {
-          console.log('Content length:', data.content.length)
-          console.log('First 500 chars of content:', data.content.substring(0, 500))
-          const parsedLogs = parseLogContent(data.content)
-          console.log('Parsed logs:', parsedLogs.length, 'entries')
-          console.log('First parsed log entry:', parsedLogs[0])
-          setLogs(parsedLogs)
-        } else {
-          console.log('No content found in response')
-          setError('No log content found in API response')
-        }
-      } catch (err) {
-        console.error('Error fetching logs:', err)
-        setError('Failed to fetch logs: ' + (err as Error).message)
-      } finally {
-        setLoading(false)
-      }
-    }
+    if (hasFetched.current) return
+    hasFetched.current = true
     fetchLogs()
-  }, [])
+  }, [fetchLogs])
+
+  const handleRefresh = () => {
+    fetchLogs()
+  }
 
   const getLogLevelColor = (level: string) => {
-    switch (level) {
+    switch (level.toUpperCase()) {
       case 'ERROR':
         return 'text-red-600 bg-red-50 border-red-200'
       case 'WARNING':
@@ -153,7 +105,7 @@ const CeleryLogs = () => {
         return 'text-blue-600 bg-blue-50 border-blue-200'
       case 'DEBUG':
         return 'text-gray-600 bg-gray-50 border-gray-200'
-      case 'RAW':
+      case 'UNKNOWN':
         return 'text-purple-600 bg-purple-50 border-purple-200'
       default:
         return 'text-gray-600 bg-gray-50 border-gray-200'
@@ -162,14 +114,28 @@ const CeleryLogs = () => {
 
   const formatTimestamp = (timestamp: string) => {
     try {
-      // Handle Celery format: "10/Jul/2025 13:25:13"
+      // Handle empty timestamp
+      if (!timestamp || timestamp.trim() === '') {
+        return 'No timestamp'
+      }
+      
+      // Handle Celery format: "29/Oct/2025 20:56:06"
       if (timestamp.includes('/')) {
         return new Date(timestamp).toLocaleString()
       }
+      
+      // Handle ISO format: "2025-10-29T20:56:06"
+      if (timestamp.includes('T')) {
+        return new Date(timestamp).toLocaleString()
+      }
+      
       // Handle Django format: "2025-06-04 10:51:18,412"
-      return new Date(timestamp.replace(',', '.')).toLocaleString()
-    } catch (error) {
-      console.error('Error formatting timestamp:', error)
+      if (timestamp.includes(',')) {
+        return new Date(timestamp.replace(',', '.')).toLocaleString()
+      }
+      
+      return new Date(timestamp).toLocaleString()
+    } catch {
       return timestamp
     }
   }
@@ -191,8 +157,91 @@ const CeleryLogs = () => {
   }
 
   return (
-    <div className="max-w-7xl  p-6">
-      <h1 className="text-3xl font-bold mb-6 ">Celery Logs</h1>
+    <div className="max-w-7xl p-6">
+      <h1 className="text-3xl font-bold mb-6">Celery Logs</h1>
+      
+      {/* Filter Controls */}
+      <div className="mb-6 p-4 bg-white border rounded-lg shadow-sm">
+        <h2 className="text-lg font-semibold mb-4">Filter Logs</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div>
+            <label htmlFor="hours" className="block text-sm font-medium text-gray-700 mb-1">
+              Hours
+            </label>
+            <input
+              type="number"
+              id="hours"
+              value={hours}
+              onChange={(e) => setHours(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="6"
+              min="1"
+              max="168"
+            />
+            <p className="text-xs text-gray-500 mt-1">Number of hours to look back (1-168)</p>
+          </div>
+          <div>
+            <label htmlFor="limit" className="block text-sm font-medium text-gray-700 mb-1">
+              Limit
+            </label>
+            <input
+              type="number"
+              id="limit"
+              value={limit}
+              onChange={(e) => setLimit(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="100"
+              min="1"
+              max="1000"
+            />
+            <p className="text-xs text-gray-500 mt-1">Maximum number of log entries (1-1000)</p>
+          </div>
+          <div>
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Loading...' : 'Refresh Logs'}
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      {/* File Info */}
+      {fileInfo && (
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+          <h2 className="text-lg font-semibold mb-2">File Information</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <span className="font-medium">Filename:</span> {fileInfo.filename}
+            </div>
+            <div>
+              <span className="font-medium">Path:</span> {fileInfo.path}
+            </div>
+            <div>
+              <span className="font-medium">Exists:</span> 
+              <span className={`ml-1 ${fileInfo.exists ? 'text-green-600' : 'text-red-600'}`}>
+                {fileInfo.exists ? 'Yes' : 'No'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Pagination Info */}
+      {pagination && (
+        <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+          <div className="flex justify-between items-center text-sm">
+            <span>
+              Showing {pagination.lines_returned} of {pagination.total_lines_in_file} lines
+            </span>
+            <span>
+              Limit: {pagination.limit} lines per page
+            </span>
+          </div>
+        </div>
+      )}
       
       {logs.length === 0 && !loading && !error && (
         <div className="text-center py-8">
@@ -202,30 +251,46 @@ const CeleryLogs = () => {
       
       {/* Logs */}
       {logs.length > 0 && (
-        <div className="space-y-2 max-h-screen overflow-y-auto ">
+        <div className="space-y-2 max-h-screen overflow-y-auto">
           {logs.map((log, index) => (
             <div 
               key={index}
               className={`p-4 rounded-lg border-l-4 ${getLogLevelColor(log.level)}`}
             >
-              <div className="flex items-start justify-between mb-2 ">
-                <div className="flex items-start gap-3">
+              {/* Header with structured info */}
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-start gap-3 flex-wrap">
                   <span className={`px-2 py-1 rounded text-xs font-semibold ${getLogLevelColor(log.level)}`}>
                     {log.level}
                   </span>
-                  <span className="text-sm text-gray-600 ">
-                    {formatTimestamp(log.timestamp)}
+                  <span className="text-sm text-gray-600">
+                    {formatTimestamp(log.time || log.timestamp)}
                   </span>
-                  <span className="text-sm text-gray-500 ">
-                    {log.module}
+                  {log.parsed && (
+                    <>
+                      <span className="text-sm text-blue-600 font-mono">
+                        {log.parsed.module}:{log.parsed.lineNumber}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        PID: {log.parsed.processId} | TID: {log.parsed.threadId}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+              
+              {/* Task ID if present */}
+              {log.parsed?.taskId && (
+                <div className="mb-2">
+                  <span className="text-xs text-purple-600 font-mono bg-purple-50 px-2 py-1 rounded">
+                    TASK: {log.parsed.taskId}
                   </span>
                 </div>
-                <span className="text-xs text-gray-400 ">
-                  PID: {log.processId} | TID: {log.threadId}
-                </span>
-              </div>
-              <div className="text-sm text-gray-800 font-mono whitespace-pre-wrap flex items-start">
-                {log.message}
+              )}
+              
+              {/* Message content */}
+              <div className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                {log.parsed?.message || log.content}
               </div>
             </div>
           ))}
